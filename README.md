@@ -2,25 +2,24 @@
 
 **Your AI agent is smart but forgetful. GBrain gives it a brain.**
 
-**[97.60% R@5 on the public LongMemEval `_s` benchmark.](https://github.com/garrytan/gbrain-evals/blob/master/docs/benchmarks/2026-05-07-longmemeval-s.md)**
-500 questions. **No LLM in the retrieval loop. $0.50 per 1000 queries.**
-Deterministic, reproducible, ships in the binary as `gbrain eval longmemeval
-<dataset.jsonl>`. Beats MemPalace's published raw baseline by a point. Beats
-every academic dense retriever on this dataset (Stella ~85%, Contriever ~78%,
-BM25 ~70%). Within striking distance of MemPalace's LLM-reranked variant
-(98.4% held-out) — but they pay for an LLM call on every retrieval; gbrain
-does not. Mastra and Supermemory publish higher numbers but measure a
-different metric (end-to-end QA accuracy with an LLM judge, not retrieval
-recall).
+Ask your agent about a meeting from six weeks ago, a paper you skimmed in
+March, an idea you jotted down late one night. GBrain finds it. And it knows
+the connections — who attended that meeting, who that paper's author has
+invested in, what other ideas in your brain it overlaps with.
 
-**Plus +31.4 points P@5 from the self-wiring knowledge graph** when your
-queries are relational ("who works at X?", "what did Y invest in this
-quarter?"). [BrainBench v0.20.0](https://github.com/garrytan/gbrain-evals/blob/master/docs/benchmarks/2026-04-23-brainbench-v0.20.0.md)
-measures gbrain against three baselines on a 240-page rich-prose corpus with
-145 relational gold queries. Vector-only RAG scores **10.8% P@5**. Grep-BM25
-scores **17.1%**. Vector+keyword RRF without graph scores **17.8%**. gbrain
-scores **49.1%** — the graph layer is separable, measured, and load-bearing.
-Flat across seven releases (v0.16 → v0.20). Zero retrieval regression.
+On the standard public benchmark for AI memory systems, the right answer
+lands in gbrain's top 5 results **97.6% of the time**. Better than every
+comparable system that doesn't pay for a language-model call on every
+retrieval, at $0.50 per thousand queries.
+
+For relational questions ("who works at this company?", "what did this
+founder invest in this quarter?"), gbrain's self-wiring knowledge graph
+makes the answer roughly **4× more relevant** than plain vector RAG. The
+graph isn't hand-curated. Every page write extracts entity references and
+creates typed edges (`works_at`, `attended`, `invested_in`, `founded`,
+`advises`) with zero language-model calls.
+
+[Receipts on the evals →](#receipts-on-the-evals)
 
 Built by the President and CEO of Y Combinator to run his own AI agents. The
 production brain powering Garry's OpenClaw and Hermes deployments has grown
@@ -115,55 +114,78 @@ the LAN.
 
 ---
 
-## Benchmarks
+## Receipts on the evals
 
-Every retrieval, ranking, and compression claim in this README is backed by
-a published eval. Full reports, reproduction commands, corpora, and
-cross-system tables live in the sibling
-[gbrain-evals](https://github.com/garrytan/gbrain-evals) repo.
+The lead's numbers come from published, reproducible eval runs. Sibling
+repo [gbrain-evals](https://github.com/garrytan/gbrain-evals) has the full
+reports, corpora, and cross-system tables. Glossary so the metric jargon
+below doesn't get in the way:
 
-### Public benchmarks
+- **R@5** — did the right answer land in gbrain's top 5? Higher is better.
+- **P@5** — what fraction of the top 5 are actually correct? Higher is better.
+- **No LLM in the loop** — retrieval uses embeddings + keyword search +
+  ranking, with no language model called per query. Cheaper, deterministic,
+  reproducible.
 
-| Benchmark | gbrain result | Top published competitor | Comparable | Date |
-|---|---|---|---|---|
-| **LongMemEval `_s` (R@5, 500Q)** | **97.60%** (`gbrain-hybrid`, no LLM in loop) | MemPalace raw 96.6%; hybrid+rerank 98.4% (with LLM) | yes — same dataset, K, n | 2026-05-07 |
-| LongMemEval `_s` per-type | +7.1pt single-session-assistant vs MemPal | MemPal | yes | 2026-05-07 |
+### LongMemEval — the standard public memory benchmark
 
-Mastra (94.87%) and Supermemory (~99%) publish QA-accuracy on this dataset
-with an LLM judge in the loop — different metric, not directly comparable.
-See the [cross-system comparison](https://github.com/garrytan/gbrain-evals/blob/master/docs/comparison-systems.md)
-for the honest table.
+500 questions across 6 question types, each against a haystack of ~50
+conversation sessions. Built by [Wu et al.](https://huggingface.co/datasets/xiaowu0162/longmemeval),
+the published yardstick for memory systems.
 
-### In-house BrainBench corpus
-
-| Adapter | P@5 | R@5 | Δ vs gbrain |
+| System | R@5 | LLM in retrieval? | Notes |
 |---|---|---|---|
-| **gbrain** (full hybrid + graph) | **49.1%** | **97.9%** | — |
-| vector-grep-rrf-fusion (graph disabled) | 17.8% | 65.1% | **−31.4 pts P@5** |
-| grep-only (BM25) | 17.1% | 62.4% | −32.0 pts P@5 |
-| vector-only (cosine RAG) | 10.8% | 40.7% | −38.4 pts P@5 |
+| **gbrain-hybrid** | **97.60%** | no | this run, 2026-05-07 |
+| MemPalace hybrid+rerank (held-out) | 98.4% | yes | 0.8pt ahead because they pay for an LLM call per query |
+| MemPalace raw | 96.6% | no | gbrain wins this head-to-head by 1pt |
+| Hindsight | 91.4% | yes | per their release |
+| Stella (academic) | ~85% | no | dense retriever |
+| Contriever (academic) | ~78% | no | dense retriever |
+| BM25 (sparse) | ~70% | no | keyword baseline |
 
-240-page rich-prose corpus (80 people / 80 companies / 50 meetings / 30
-concepts), 145 relational gold queries, deterministic re-runs. The graph
-layer's contribution (+31.4 pts P@5) is separable and reproducible. Flat
-across v0.16 → v0.20 — zero retrieval regression over seven releases.
+Mastra (94.87%) and Supermemory (~99%) publish on this dataset but measure
+end-to-end QA accuracy with an LLM judge, which is a different thing than
+"did retrieval find the right session." Not directly comparable; flagged
+honestly in the [cross-system table](https://github.com/garrytan/gbrain-evals/blob/master/docs/comparison-systems.md).
+Reports + reproduction:
+[2026-05-07 LongMemEval](https://github.com/garrytan/gbrain-evals/blob/master/docs/benchmarks/2026-05-07-longmemeval-s.md).
 
-### Source-swamp resistance
+### BrainBench — relational queries (in-house corpus)
 
-Curated content vs bulk content: do articles win against chat dumps that
-mention the same phrases? gbrain v0.22.0 source-aware ranking lifts top-1
-from 80% (grep-only) and 90% (pre-source-boost) to **93.3%**, while
-keeping swamp-at-top at **6.7%**. [Full report.](https://github.com/garrytan/gbrain-evals/blob/master/docs/benchmarks/2026-04-25-brainbench-cat13b-source-swamp.md)
+LongMemEval is conversation-style. The other half of the proof is relational
+questions over a structured knowledge base. We built a 240-page rich-prose
+corpus (80 people, 80 companies, 50 meetings, 30 concepts) and wrote 145
+relational gold queries — "who attended this meeting?", "what's this person
+invested in?" — against it. Reproducible, deterministic.
 
-### Skill / prompt compression
+| Retrieval system | P@5 | Δ vs gbrain |
+|---|---|---|
+| **gbrain** (hybrid + knowledge graph) | **49.1%** | — |
+| Vector + keyword RRF (graph turned off) | 17.8% | −31.4 |
+| Keyword search only (BM25) | 17.1% | −32.0 |
+| Vector-only RAG | 10.8% | −38.4 |
 
-`functional-area-resolver` is a two-layer dispatch pattern for compressing
-an agent's `AGENTS.md` / `RESOLVER.md`. A real-world 25KB resolver
-compressed to **13KB (48% size)** and **gained +13 to +17pp routing
-accuracy** across three frontier models (Opus 4.7, Sonnet 4.6, Haiku 4.5).
-The `(dispatcher for: ...)` clause is load-bearing — the ablation case
-(same compression without it) collapses Sonnet's lenient accuracy to
-41.7%. [Receipts in this repo.](evals/functional-area-resolver/)
+The knowledge graph layer is worth **31 points P@5** on these queries.
+Separable, measured, load-bearing. Flat across seven releases (v0.16 → v0.20)
+— zero retrieval regression while ops + infra changed underneath.
+[Full report.](https://github.com/garrytan/gbrain-evals/blob/master/docs/benchmarks/2026-04-23-brainbench-v0.20.0.md)
+
+### Curated content vs bulk swamp
+
+Personal brains accumulate bulk content (tweet dumps, daily chat
+transcripts, archived articles). When a query phrase appears in both a
+short curated essay AND a long chat dump, which wins? Source-aware ranking
+keeps the essay on top. **93.3% top-1 hit** (vs 80% on grep-only). [Report.](https://github.com/garrytan/gbrain-evals/blob/master/docs/benchmarks/2026-04-25-brainbench-cat13b-source-swamp.md)
+
+### Prompt compression
+
+Routing rule: the `functional-area-resolver` skill compresses a fat
+`AGENTS.md` into a two-layer dispatch table. A real-world 25KB resolver
+compressed to **13KB (48% the size) and gained 13–17 percentage points of
+routing accuracy** across Opus 4.7, Sonnet 4.6, and Haiku 4.5. The
+`(dispatcher for: ...)` clause is load-bearing — strip it (same
+compression, no dispatcher signal) and Sonnet's accuracy collapses to
+41.7%. [Cross-model receipts in this repo.](evals/functional-area-resolver/)
 
 ### Run your own evals
 
@@ -174,16 +196,16 @@ gbrain eval longmemeval ~/Downloads/longmemeval_s.jsonl
 # Multi-model output quality gate (3 frontier models score the same output)
 gbrain eval cross-modal --task "..." --output report.md
 
-# Capture every real query/search call as eval data (contributor mode)
+# Capture real query/search traffic as regression-eval data
 GBRAIN_CONTRIBUTOR_MODE=1 gbrain eval export > snapshot.ndjson
-gbrain eval replay --against snapshot.ndjson   # regression-gate retrieval
+gbrain eval replay --against snapshot.ndjson
 
-# In-house BrainBench (sibling repo)
+# In-house BrainBench corpus + multi-adapter runner
 cd ~/git/gbrain-evals && bun eval/runner/multi-adapter.ts
 ```
 
-The full BrainBench corpus + per-category scorecards (Cats 1–13) live in
-[`gbrain-evals/eval/data/`](https://github.com/garrytan/gbrain-evals/tree/master/eval/data).
+Full BrainBench corpus + per-category scorecards (Cats 1–13) in the sibling
+[gbrain-evals](https://github.com/garrytan/gbrain-evals) repo.
 
 ---
 
