@@ -286,3 +286,40 @@ describe('brainstorm --resume (TX3 load-bearing)', () => {
     expect((caught as Error).message).toMatch(/--resume run_id=deadbeefcafe0000 does not match/);
   });
 });
+
+// F2 smoke test: end-to-end --max-cost pre-flight refusal. The user-facing
+// path is "estimate exceeds cap, run aborts before any LLM call". This pins
+// the (a) typed-throw, (b) reason='cost', (c) paste-ready error message
+// content, and (d) that no chatFn calls happen during pre-flight.
+describe('brainstorm --max-cost pre-flight refusal (F2 smoke)', () => {
+  test('estimate above cap → BudgetExhausted(reason="cost") before any chat call', async () => {
+    const chat = makeChatFnMixed(99999);
+    let caught: unknown = null;
+    try {
+      await runBrainstorm(engine, {}, {
+        question: 'pre-flight cap smoke question',
+        profile: tinyProfile,
+        skipCostPreview: true,
+        // Pre-run estimate is at the cents level; $0.0001 forces a refusal.
+        maxCostUsd: 0.0001,
+        chatFn: chat.fn,
+        embedQueryFn: async () => basisEmbedding(0),
+        stderrWrite: () => {},
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(BudgetExhausted);
+    const err = caught as BudgetExhausted;
+    expect(err.reason).toBe('cost');
+    // User-facing hint must point at remediation paths so the operator
+    // can fix forward without reading the source.
+    expect(err.message).toMatch(/exceeds --max-cost/);
+    expect(err.message).toMatch(/--limit/);
+    expect(err.message).toMatch(/--max-far-set/);
+    // No chat calls during pre-flight — the cap fires before any provider
+    // HTTP would happen on a real run.
+    expect(chat.crossCalls).toBe(0);
+    expect(chat.judgeCalls).toBe(0);
+  });
+});
