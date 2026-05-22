@@ -603,6 +603,12 @@ export async function doctorReportRemote(engine: BrainEngine): Promise<DoctorRep
   checks.push(await checkGradeConfidenceDrift(engine));
   checks.push(await checkVoiceGateHealth(engine));
 
+  // 11. v0.40.3.0 contextual_retrieval_coverage — surfaces pages with
+  //   - chunker_version drift (pre-v40 pages not yet re-embedded)
+  //   - contextual_retrieval_mode IS NULL (mode never evaluated)
+  //   - synopsis-failures audit JSONL entries from the last 7 days
+  checks.push(await checkContextualRetrievalCoverage(engine));
+
   return computeDoctorReport(checks);
 }
 
@@ -614,6 +620,90 @@ export async function doctorReportRemote(engine: BrainEngine): Promise<DoctorRep
  * follow-up page. These are commitments the user made and never revisited.
  * Status 'ok' with a count; never warns/fails (this is signal, not error).
  */
+/**
+ * v0.40.3.0 contextual_retrieval_coverage check.
+ *
+ * Surfaces drift between the active CR mode + the per-page
+ * `contextual_retrieval_mode` column. Three signals:
+ *
+ *   1. Pages with chunker_version < current — pre-v40 pages that need
+ *      to be re-embedded for the wrapper to apply. Paste-ready fix:
+ *      `gbrain reindex --markdown`.
+ *   2. Pages with contextual_retrieval_mode IS NULL — never evaluated
+ *      against the CR ladder. Same fix as (1).
+ *   3. Synopsis-failure events in the audit JSONL over the last 7 days
+ *      — surfaces refusals + page-level fallbacks. >5% refusal rate
+ *      warns; otherwise reported as informational.
+ *
+ * Reads `~/.gbrain/audit/synopsis-failures-YYYY-Www.jsonl` via
+ * readRecentSynopsisFailures + summarizeSynopsisFailures from
+ * `src/core/audit-synopsis.ts`. Failure-only audit means low write
+ * volume on healthy brains.
+ */
+export async function checkContextualRetrievalCoverage(engine: BrainEngine): Promise<Check> {
+  try {
+    const { MARKDOWN_CHUNKER_VERSION } = await import('../core/chunkers/recursive.ts');
+    const rows = await engine.executeRaw<{ chunker_drift: number; mode_null: number }>(
+      `SELECT
+         COUNT(*) FILTER (WHERE chunker_version < $1)::int AS chunker_drift,
+         COUNT(*) FILTER (WHERE contextual_retrieval_mode IS NULL)::int AS mode_null
+       FROM pages
+       WHERE page_kind = 'markdown'
+         AND deleted_at IS NULL`,
+      [MARKDOWN_CHUNKER_VERSION],
+    );
+    const chunkerDrift = rows[0]?.chunker_drift ?? 0;
+    const modeNull = rows[0]?.mode_null ?? 0;
+
+    // Synopsis-failures audit summary (best-effort; missing audit file = 0).
+    let failureSummaryLine = '';
+    try {
+      const audit = await import('../core/audit-synopsis.ts');
+      const events = audit.readRecentSynopsisFailures(7);
+      const summary = audit.summarizeSynopsisFailures(events);
+      if (summary && summary.total > 0) {
+        const rate = (summary.page_level_fallback_rate * 100).toFixed(1);
+        failureSummaryLine =
+          ` ${summary.total} synopsis failure(s) in last 7d ` +
+          `(${summary.page_level_fallback_count} triggered page-level fall-back, ${rate}%).`;
+      }
+    } catch {
+      // Audit module unavailable — skip the summary line.
+    }
+
+    if (chunkerDrift === 0 && modeNull === 0 && failureSummaryLine === '') {
+      return {
+        name: 'contextual_retrieval_coverage',
+        status: 'ok',
+        message: 'All markdown pages aligned to current chunker + CR mode.',
+      };
+    }
+
+    const parts: string[] = [];
+    if (chunkerDrift > 0) {
+      parts.push(`${chunkerDrift} page(s) at older chunker_version`);
+    }
+    if (modeNull > 0) {
+      parts.push(`${modeNull} page(s) never evaluated against CR ladder`);
+    }
+    const fixHint =
+      chunkerDrift > 0 || modeNull > 0
+        ? ` Run \`gbrain reindex --markdown\` to align.`
+        : '';
+    return {
+      name: 'contextual_retrieval_coverage',
+      status: chunkerDrift > 0 || modeNull > 0 ? 'warn' : 'ok',
+      message: `${parts.join('; ')}.${fixHint}${failureSummaryLine}`,
+    };
+  } catch (e) {
+    return {
+      name: 'contextual_retrieval_coverage',
+      status: 'warn',
+      message: `Could not check contextual retrieval coverage: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+}
+
 export async function checkAbandonedThreads(engine: BrainEngine): Promise<Check> {
   try {
     const rows = await engine.executeRaw<{ count: number }>(
