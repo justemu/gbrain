@@ -670,6 +670,7 @@ export function diagnoseEmbedding(modelOverride?: string): EmbeddingDiagnosis {
   if (
     Array.isArray(tp.models) &&
     tp.models.length === 0 &&
+    !parsed.modelId &&
     (recipe.id === 'litellm' || isUserProvided)
   ) {
     return {
@@ -2408,12 +2409,24 @@ export async function chat(opts: ChatOpts): Promise<ChatResult> {
             toolName: part.toolName,
             input: part.input ?? part.args,
           });
+        } else if (part.type === 'reasoning') {
+          // AI SDK v6 places reasoning-model output (e.g. DeepSeek
+          // reasoning_content) in typed ReasoningPart blocks. These contain
+          // the visible response when content/text is empty.
+          blocks.push({ type: 'text', text: part.text });
         }
       }
     } else {
       // Fallback shape for SDK versions exposing flat .text and .toolCalls.
-      if (typeof (result as any).text === 'string' && (result as any).text.length > 0) {
-        blocks.push({ type: 'text', text: (result as any).text });
+      let textFallback = (result as any).text as string | undefined;
+      // When text is empty, check reasoningText — models like DeepSeek
+      // that return content only through reasoning channels may leave
+      // .text empty while .reasoningText carries the response.
+      if (!textFallback || textFallback.length === 0) {
+        textFallback = (result as any).reasoningText as string | undefined;
+      }
+      if (typeof textFallback === 'string' && textFallback.length > 0) {
+        blocks.push({ type: 'text', text: textFallback });
       }
       for (const tc of (result as any).toolCalls ?? []) {
         blocks.push({
