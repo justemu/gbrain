@@ -2357,7 +2357,7 @@ export async function chat(opts: ChatOpts): Promise<ChatResult> {
   const tools = (opts.tools ?? []).reduce((acc, t) => {
     acc[t.name] = {
       description: t.description,
-      inputSchema: { jsonSchema: t.inputSchema } as any,
+      inputSchema: t.inputSchema as any,
     };
     return acc;
   }, {} as Record<string, any>);
