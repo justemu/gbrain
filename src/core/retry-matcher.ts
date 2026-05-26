@@ -20,11 +20,13 @@ const CONN_PATTERNS = [
   /connection.*closed/i,
   /server closed the connection/i,
   /could not connect to server/i,
-  // v0.41.2.1: gbrain's own GBrainError thrown by getConnection() when
-  // the singleton pool was nulled (engine.disconnect mid-cycle, or
-  // postgres.js's auto-recovery between queries). Matches the literal
-  // message shape from PR #1416's reported batch-loss incident.
-  /No database connection/i,
+  // NOTE: gbrain's own 'No database connection' error (thrown by
+  // getConnection() when the module-level sql singleton is null) is
+  // NOT retryable — it means the pool was destroyed by an idempotent
+  // disconnect() and will not recover without an explicit reconnect().
+  // Treating it as retryable produces misleading "connection blip"
+  // log messages and wastes a 500ms retry. The root cause of pool
+  // destruction should be fixed instead (see PR for lint.ts fix).
 ];
 
 interface PgError {
