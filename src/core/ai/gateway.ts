@@ -2367,6 +2367,16 @@ export async function chat(opts: ChatOpts): Promise<ChatResult> {
   if (useCache) {
     providerOptions.anthropic = { cacheControl: { type: 'ephemeral' } };
   }
+  // Disable thinking/reasoning for all openai-compatible providers.
+  // DeepSeek defaults to thinking mode; Ollama/OpenRouter/Groq/etc. silently
+  // ignore the unknown param. The @ai-sdk/openai-compatible provider spreads
+  // providerOptions[recipe.id] into the request body, so this sends:
+  //   "thinking": {"type": "disabled"}
+  // in every chat completion call to these providers — saving ~30-50% output
+  // tokens for non-reasoning use cases (most gbrain operations).
+  if (recipe.implementation === 'openai-compatible') {
+    providerOptions[recipe.id] = { thinking: { type: 'disabled' } };
+  }
 
   let _budgetRecorded = false;
   const _recordBudget = (modelLabel: string, inputTokens: number, outputTokens: number): void => {
